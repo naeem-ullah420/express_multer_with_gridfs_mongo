@@ -1,89 +1,95 @@
 const express = require('express')
+const { default: mongoose, mongo } = require('mongoose')
 const app = express()
-const mongoose = require('mongoose')
-const multer = require('multer');
-const Grid = require('gridfs-stream');
+const multer = require('multer')
 const {GridFsStorage} = require('multer-gridfs-storage');
+const Grid = require('gridfs-stream');
 
+app.set('view engine', 'ejs')
 
-// Connect to MongoDB using Mongoose
-mongoose.connect('mongodb://localhost:27017/mongodb_gridfs');
+const MONGODB_URI = "mongodb://127.0.0.1:27017/mongodb_gridfs"
 
-Grid.mongo = mongoose.mongo;
-let gfs, gridFSBucket;
+mongoose.connect(MONGODB_URI)
+
+let gfs, gridFsBucket;
 mongoose.connection.once('open', () => {
-    gfs = Grid(mongoose.connection.db, mongoose.mongo);
-    gfs.collection('files');
-    gridFSBucket = new mongoose.mongo.GridFSBucket(mongoose.connection, {
-        bucketName: "files",
-    });
-    console.log("gridFS Initialized")
+    console.log("mongodb connected")
+    gfs = Grid(mongoose.connection.db, mongo)
+    gfs.collection('files')
+    gridFsBucket = new mongoose.mongo.GridFSBucket(mongoose.connection, {
+        bucketName:'files'
+    })
+    console.log("GridFs initialized")
 })
 
 mongoose.connection.once('error', (e) => {
-    console.log("Error in connecting mongodb: ", e)
+    console.log("mongodb connection error", e)
 })
 
 
-// Set up storage engine using Multer and GridFS
-const storage = new GridFsStorage({
-    url: 'mongodb://localhost:27017/mongodb_gridfs',
-    options: { useNewUrlParser: true, useUnifiedTopology: true },
+const storage = new GridFsStorage({ 
+    url : MONGODB_URI,
     file: (req, file) => {
+        console.log(file)
         return {
-          filename: file.originalname,
-          bucketName: 'files'
+            filename:   file.originalname,
+            bucketName: 'files'
         };
-    },
-})
+    }
+});
 
-const upload = multer({ storage: storage });
-
-app.set('view engine', 'ejs');
+const upload = multer({ storage: storage })
 
 app.get("/", async (req, res) => {
-    const files = await gfs.files.find({}).sort({ uploadDate: -1 }).toArray()
-    return res.render("pages/home", {
-        files: files
+    let files = await gfs.files.find({}).sort({
+        'uploadDate' : -1
+    }).toArray()
+    console.log(files)
+    res.render('pages/home', {
+        "files": files
     })
-    
 })
 
 
-app.post("/uploadFile", upload.array('files'), (req, res) => {
+
+app.post("/uploadFile", upload.array('files', 10), (req, res) => {
     return res.redirect("/")
 })
 
-app.get("/getFile/:file_id", async (req, res) => {
-    try {
-        const file = await gfs.files.findOne({ _id: new mongoose.Types.ObjectId(req.params.file_id) });
-        if(file.contentType.includes("image") || file.contentType.includes("vide")) {
-            res.setHeader("content-type", file.contentType);
-        } else {
-            res.setHeader("Content-Type", "application/octet-stream");
-            res.setHeader("Content-Disposition", `attachment; filename="${file.filename}"`);
-        }
-        const readStream = gridFSBucket.openDownloadStream(new mongoose.Types.ObjectId(file._id));
-        readStream.pipe(res);
-    } catch (error) {
-        console.log("Error: ", error)
-        res.send("not found");
-    }
-});
 
-app.get("/deleteFile/:file_id", async (req, res) => {
+app.get('/getFile/:fileId', async (req, res) => {
     try {
-        await gfs.files.deleteOne({ _id: new mongoose.Types.ObjectId(req.params.file_id) });
+        let file = await gfs.files.findOne({
+            '_id': new mongoose.Types.ObjectId(req.params.fileId)
+        })
+        
+        if(file.contentType.includes("image") || file.contentType.includes("video")) {
+            res.setHeader('Content-Type', file.contentType)
+        } else {
+            res.setHeader('Content-Type', file.contentType)
+            res.setHeader('Content-Disposition', 'attachment; filename= ' + file.filename)
+        }
+
+        const readStream = gridFsBucket.openDownloadStream(file._id)
+        readStream.pipe(res)
+    } catch (error) {
+        console.log("Error: ", e)
+        res.send("File not found")
+    }
+})
+
+app.get('/deleteFile/:fileId', async (req, res) => {
+    try {
+        let file = await gfs.files.deleteOne({
+            '_id': new mongoose.Types.ObjectId(req.params.fileId)
+        })
         return res.redirect("/")
     } catch (error) {
-        console.log("Error: ", error)
-        res.send("not found");
+        console.log("Error: ", e)
+        res.send("File not found")
     }
-});
-
-
-
+})
 
 app.listen(8000, () => {
-    console.log("Server is listening at http://localhost:8000")
+    console.log("server is running at http://localhost:8000")
 })
